@@ -11,7 +11,18 @@ library(tidyverse)
 library(knitr) # kable()
 library(lmerTest) #lmer()
 library(Metrics)
+library(lattice)
+library(latticeExtra)
 
+library(shiny)
+library(rsconnect)
+##library(shinytheme)
+
+library(AzureAuth)
+library(AzureStor)
+library(AzureTableStor)
+library(sendmailR)
+library(shinythemes)
 ########################################
 # Functions needed for the dynamic predictions #
 ########################################
@@ -215,6 +226,7 @@ right_rows <- function(data, times, ids, Q_points) {
   data[c(ind), ]
 }
 
+
 DynPlots <- function(model.output = model.output, newdata, timeVar,
                      main_title = "Dynamic predictions"){
   
@@ -245,8 +257,9 @@ DynPlots <- function(model.output = model.output, newdata, timeVar,
   p68_1 = as.numeric( unlist(c(pred68[,"Echo_Age_Years"], (pred68[,"Echo_Age_Years"]))) )
   p68_2 = as.numeric( unlist( c(pred68[,"upp"], (pred95[,"low"])) ) )
   
+  ##jpeg("img_folder/jpg_img.jpg")
   ### Generating plot -----------------------------------------------------
-  xyplot(pred ~ timeVariable , main = main_title, data = pred95,
+  jpg_img <- xyplot(pred ~ timeVariable , main = main_title, data = pred95,
          type = "l", col = rgb(0.6769,0.4447,0.7114, alpha = 1), lty = c(1, 2, 2), lwd = 3,
          ylim = c(0,6), xlim = c(0,20), ylab = list(yOutcome, cex = 1.5), xlab = list(timeVar, cex
                                                                                       = 1.5),
@@ -266,18 +279,374 @@ DynPlots <- function(model.output = model.output, newdata, timeVar,
            panel.lines(x = rep(tail(nopred[[timeVar]], n = 1), 20), y = seq(0, 6, length =
                                                                               20), col = "grey", lty = 3, lwd = 2)
          })
+  # print(jpg_img)
+  # dev.off()
+  return(jpg_img)
 }
 
-dat_tch_final <- readRDS("./dat_tch_final.05.10.2023.rds")
+process_data_plot <- function(dat, predict_age) {
+  dat_abstract <- dat
+  #print(colnames(dat_abstract))
+  #colnames(dat_abstract)[colnames(dat_abstract)=='Age at Echo'] <- 'Echo_Age_Years'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Sex'] <- 'female'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Aortic_Root_Dimension'] <- 'aort_root_new'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Weight (kg)'] <- 'Weight'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Height (cm)'] <- 'Height'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Aortic.root.z.score'] <- 'z_aort_root'
+  #print(colnames(dat_abstract))
 
-#evaluate not including the 16 yr as knot location to avoid predictions descending, use # prior to comma
-model_ARS_Dem <- lme(aort_root_new ~ female * ns(Echo_Age_Years, knots = c(2, 6, 10, 16
-)),
-data = dat_tch_final,
-random = list(ID =
-                pdDiag(form = ~ ns(Echo_Age_Years, knots = c(2, 6, 10, 16
-                )))),
-na.action = na.exclude,
-control = lmeControl(maxIter = 1e8, msMaxIter = 1e8))
+  dat_abstract$female = dat_abstract$female - 1
+  nd <- dat_abstract
+  nd <-nd[with(nd,order(Echo_Age_Years)),]
+
+  # ## step 2: to get the PREDIICTION interval
+  pred_dat_001_95 <- IndvPred_lme(model_ARS_Dem,newdata = nd, timeVar = "Echo_Age_Years", M = 500, return_data = F)
+  pred_dat_001_68 <- IndvPred_lme(model_ARS_Dem,newdata = nd, timeVar = "Echo_Age_Years", M = 500, return_data = F,level = 0.68)
+  pred_times=pred_dat_001_95$times_to_pred$'1'
+  ##print(pred_times)
+  pred=pred_dat_001_95$predicted_y
+
+  lower95=pred_dat_001_95$low
+  upper95=pred_dat_001_95$upp
+  lower68=pred_dat_001_68$low
+  upper68=pred_dat_001_68$upp
+
+  dat <- data.frame(pred_times)
+  dat$pred = pred
+  dat$lower95=lower95
+  dat$upper95=upper95
+  dat$lower68=lower68
+  dat$upper68=upper68
+  #
+  #
+  predicted_value<- approx(dat$pred_times, dat$pred, xout=predict_age)$y
+
+ 
+  jpg_img <- DynPlots(model.output = model_ARS_Dem, newdata = nd,
+               timeVar = "Echo_Age_Years",
+               main_title = "predicted aortic size at age ")
+  
+ 
+
+  return(jpg_img)
 
 
+}
+
+process_data_func2 <- function(dat, predict_age) {
+  dat_abstract <- dat
+  #print(colnames(dat_abstract))
+  #colnames(dat_abstract)[colnames(dat_abstract)=='Age at Echo'] <- 'Echo_Age_Years'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Sex'] <- 'female'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Aortic_Root_Dimension'] <- 'aort_root_new'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Weight (kg)'] <- 'Weight'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Height (cm)'] <- 'Height'
+  colnames(dat_abstract)[colnames(dat_abstract)=='Aortic.root.z.score'] <- 'z_aort_root'
+  #print(colnames(dat_abstract))
+  
+  dat_abstract$female = dat_abstract$female - 1
+  nd <- dat_abstract
+  nd <-nd[with(nd,order(Echo_Age_Years)),]
+  
+  # ## step 2: to get the PREDIICTION interval
+  pred_dat_001_95 <- IndvPred_lme(model_ARS_Dem,newdata = nd, timeVar = "Echo_Age_Years", M = 500, return_data = F)
+  pred_dat_001_68 <- IndvPred_lme(model_ARS_Dem,newdata = nd, timeVar = "Echo_Age_Years", M = 500, return_data = F,level = 0.68)
+  pred_times=pred_dat_001_95$times_to_pred$'1'
+  ##print(pred_times)
+  pred=pred_dat_001_95$predicted_y
+  
+  lower95=pred_dat_001_95$low
+  upper95=pred_dat_001_95$upp
+  lower68=pred_dat_001_68$low
+  upper68=pred_dat_001_68$upp
+  
+  dat <- data.frame(pred_times)
+  dat$pred = pred
+  dat$lower95=lower95
+  dat$upper95=upper95
+  dat$lower68=lower68
+  dat$upper68=upper68
+  #
+  #
+  predicted_value<- c(approx(dat$pred_times, dat$pred, xout=predict_age)$y, approx(dat$pred_times, dat$lower95, xout=predict_age)$y, approx(dat$pred_times, dat$upper95, xout=predict_age)$y )
+  predicted_value <- round(predicted_value, 3)
+  
+  # DynPlots(model.output = model_ARS_Dem, newdata = nd,
+  #          timeVar = "Echo_Age_Years",
+  #          main_title = "predicted aortic size at age ")
+  
+  return( predicted_value)
+  
+}
+
+
+
+# ##dat_tch_final <- readRDS("./dat_tch_final.05.10.2023.rds")
+# 
+# dat_tch_final <- readRDS("//tccdav1b/Cardio_S/Morris/CLARITY/Frank/Aortic_Size_Prediction/CLARITY/rds/dat_tch_final.05.10.2023.rds")
+# #evaluate not including the 16 yr as knot location to avoid predictions descending, use # prior to comma
+# model_ARS_Dem <- lme(aort_root_new ~ female * ns(Echo_Age_Years, knots = c(2, 6, 10, 16
+# )),
+# data = dat_tch_final,
+# random = list(ID =
+#                 pdDiag(form = ~ ns(Echo_Age_Years, knots = c(2, 6, 10, 16
+#                 )))),
+# na.action = na.exclude,
+# control = lmeControl(maxIter = 1e8, msMaxIter = 1e8))
+# 
+# saveRDS(model_ARS_Dem, '//tccdav1b/Cardio_S/Morris/CLARITY/Frank/Aortic_Size_Prediction/CLARITY/rds/tch_data_trained_model.rds')
+
+
+
+## model_ARS_Dem <- readRDS("//tccdav1b/Cardio_S/Morris/CLARITY/Frank/Aortic_Size_Prediction/CLARITY/rds/tch_data_trained_model.rds")
+## model_ARS_Dem <- readRDS("C:\\Users\\yxcai\\Documents\\R_code\\web-test\\tch_data_trained_model.rds")
+model_ARS_Dem <- readRDS("./tch_data_trained_model.rds")
+
+names(tags)
+
+ui <- fluidPage(tags$style("body { background-color: #ADD8E6; }"),
+  titlePanel(tags$h1(tags$b("Predict future Aortic Size based on the previous information for Marfan Syndrome patients"), align = "center") ),
+  tags$br(),
+  tags$br(),
+  sidebarLayout( 
+    sidebarPanel( width = 5,
+      HTML("<h3>Step 1: Download the template file to fill the information</h3>"),
+      ##tags$a("you can follow the video lecture", href = "https://www.youtube.com/watch?v=s4YKMFFiySI"),
+      downloadButton("download_data", "Step1: please Download the template file", width = 2),
+      tags$br(),
+      HTML("<h3>Step 2: upload your previous aortic size related information defined in CSV file</h4>"),
+      fileInput("file", " "),
+      numericInput("age_need_prediction", label = "the age of aortic size need to predict:", value= 15.0),
+      actionButton("submit", "Submit"),
+      tags$br(),
+      HTML("<h3>Step 3: optional step,enter your email to receive the results and the data will be saved and used for improving the AI model</h3>"),
+      textInput("email"," "),
+      HTML("<h4> after you enter your email, click save button  </h4>"),
+      actionButton("save_file", "Save the data"),
+      # HTML("<h4> ************************</h4>"),
+    ),
+    
+    
+    mainPanel( width = 7,
+      tableOutput("data"),
+      plotOutput(outputId = "my_plot"),
+      # tags$br(),
+      # tags$br(),
+      tags$h3(textOutput("result"))
+    )
+  ),
+  widths = c(1, 1)
+ 
+)
+
+server <- function(input, output) {
+
+  data <- reactive({
+    file <- input$file
+    if (is.null(file)) {
+      return(NULL)
+    }
+    read.csv(file$datapath)
+  })
+
+  output$data <- renderTable({
+    data()
+  })
+  
+  # Download the data when the download button is clicked
+  output$download_data <- downloadHandler(
+    filename = function() {
+      "template.csv"
+    },
+    content = function(file) {
+      file.copy("template.csv", file)
+    }
+  )
+
+  output_string <- reactive({  
+  result<-process_data_func2(data(), input$age_need_prediction)
+  paste("The predicted aortic size of at the age ", input$age_need_prediction, " is ", result[[1]], " cm; \n",'The predicted lower limit is ', result[[2]], "cm; \n",'The predicted upper limit is ', result[[3]], "cm; ")
+  })
+  
+  observeEvent(input$submit, { output$result <- renderText({ output_string()  } ) }  )
+  
+  ##  Keep this code
+  # observeEvent(input$submit, { output$result <- renderText({ result<-process_data_func2(data(), input$age_need_prediction)
+  # paste("The predicted aortic size of at the age ", input$age_need_prediction, " is ", result[[1]], " cm; \n",'The predicted lower limit is ', result[[2]], "cm; \n",'The predicted upper limit is ', result[[3]], "cm; ")
+  #                            } ) }  )
+  
+  # observeEvent(input$submit, {  my_plot <- process_data_plot(data(), input$age_need_prediction) 
+  #                               output$my_plot <- renderPlot( { process_data_plot(data(), input$age_need_prediction ) } )
+  #                           ggsave("img_folder/jpg_img", device = 'jpeg')   }  )
+  
+  frank_plot <-  reactive({  process_data_plot(data(), input$age_need_prediction) })
+  
+  observeEvent(input$submit, {  
+                                output$my_plot <- renderPlot( { frank_plot()  } )
+                                ##frank_plot <- ggplotify(frank_plot)
+                                ##trellis.device("img_folder/jpg_img", type = "jpeg")
+                                  }   )
+
+  # 
+  # observeEvent(input$save_file, { ## for Table
+  #   my_table_endpoint <- table_endpoint(
+  #     "https://rdeploymenta2e3.table.core.windows.net",   ## storage endpoint
+  #     sas = "?sv=2022-11-02&ss=t&srt=sco&sp=rwdlacu&se=2025-01-01T01:21:30Z&st=2023-12-27T17:21:30Z&spr=https&sig=yYkHHuxJ2MVEadbeJkUSq9zmpN405Ngui9ShrNR9B%2FA%3D")
+  #   my_table <- storage_table(my_table_endpoint, "clarity4input4database")
+  #   AzureTableStor::import_table_entities(my_table, data(), row_key=row.names(data()), partition_key=input$email )      ## as.character(data()$ID
+  #   
+  #    }  )
+  
+
+  # observeEvent(input$save_file, {
+  #               file_name <- gsub("@", "_", input$email )
+  #               file_name <- paste0("img_folder/", file_name, '.jpg')
+  #               jpeg(file_name)
+  #               print(frank_plot())
+  #               dev.off()
+  #               
+  #               attachment <- mime_part(x = file_name )
+  #               body <- output_string()
+  # 
+  #               sendmailR::sendmail( from = "yu.cai.tch@gmail.com",
+  #                                    to =  c(input$email),
+  #                                    subject = "Confirmation of Receive Your Data",
+  #                                    ##msg = mime_part("Confirmation of Receive Your Data"),
+  #                                    msg = list(body, attachment),
+  #                                    engine = "curl",
+  #                                    engineopts = list(username = "yu.cai.tch@gmail.com", password = "ybbm kusp woaq srbn"),
+  #                                    control=list(smtpServer="smtp://smtp.gmail.com:587", verbose = TRUE) )
+  #               } )
+
+}
+
+shinyApp(ui = ui, server = server)
+
+
+
+##print( output$data)
+##
+## This code I need to study
+##
+
+# ui <- fluidPage(
+#   sidebarLayout(
+#     sidebarPanel(
+#       actionButton("repeat1", "Repeat 1")
+#     ),
+#     mainPanel(
+#       uiOutput("dynamic_sidebar")
+#     )
+#   )
+# )
+# 
+# server <- function(input, output, session) {
+#   observeEvent(input$repeat1, {
+#     # Increment the counter for dynamic sidebar generation
+#     counter <- input$repeat1
+#     # Create a unique ID for the dynamic sidebar
+#     dynamic_sidebar_id <- paste0("dynamic_sidebar_", counter)
+# 
+#     # Dynamically generate a new sidebarPanel
+#     output$dynamic_sidebar <- renderUI({
+#       tagList(
+#         # Previous dynamic sidebars
+#         lapply(1:counter, function(i) {
+#           conditionalPanel(
+#             condition = sprintf('input.%s > 0', paste0("repeat", i)),
+#             sidebarPanel(
+#               h3(paste("Dynamic Sidebar", i)),
+# 
+#               # Add your dynamic sidebar content here
+#             )
+#           )
+#         }),
+#         # New dynamic sidebar
+#         conditionalPanel(
+#           condition = sprintf('input.%s > 0', paste0("repeat", counter)),
+#           sidebarPanel(
+#             h3(paste("Dynamic Sidebar", counter)),
+#             actionButton("repeat2", "Repeat 2")
+#             # Add your dynamic sidebar content here
+#           )
+#         )
+#       )
+#     })
+#   })
+# }
+# 
+# shinyApp(ui, server)
+#  
+
+
+
+
+
+
+# # Define UI
+# ui <- fluidPage(##theme = shinytheme("cerulean"),
+#                 sidebarPanel(
+#                   HTML("<h3>Input parameters</h3>"),
+#                   #tags$h3("Input:"),
+#                   numericInput("age", label = "the age of the echo:", value= 2.0),
+#                   numericInput("aortic_size", label = "the size of arotic at the first echo (cm):", value= 2.3),
+#                   actionButton("submitbutton", "Submit", class = "btn btn-primary"),
+#                   actionButton("more_data", "more data", class = "btn btn-primary")
+#                 ), # sidebarPanel
+# 
+#                 # sidebarPanel(
+#                 #   HTML("<h3>Input parameters</h3>"),
+#                 #   #tags$h3("Input:"),
+#                 #   numericInput("age", label = "the age of the echo:", value= 2.0),
+#                 #   numericInput("aortic_size", label = "the size of arotic at the first echo (cm):", value= 2.3),
+#                 #   actionButton("more_data", "more data", class = "btn btn-primary"),
+#                 # ), # sidebarPanel
+#                 # sidebarPanel(
+#                 #   HTML("<h3>Input parameters</h3>"),
+#                 #   #tags$h3("Input:"),
+#                 #   numericInput("age", label = "the age of the echo:", value= 2.0),
+#                 #   numericInput("aortic_size", label = "the size of arotic at the first echo (cm):", value= 2.3),
+#                 #   actionButton("more_data", "more data", class = "btn btn-primary"),
+#                 # ), # sidebarPanel
+#                 # sidebarPanel(
+#                 #   HTML("<h3>Input parameters</h3>"),
+#                 #   #tags$h3("Input:"),
+#                 #   numericInput("age", label = "the age of the echo:", value= 2.0),
+#                 #   numericInput("aortic_size", label = "the size of arotic at the first echo (cm):", value= 2.3),
+#                 #   actionButton("more_data", "more data", class = "btn btn-primary"),
+#                 # ), # sidebarPanel
+#                 # sidebarPanel(
+#                 #   HTML("<h3>Input parameters</h3>"),
+#                 #   #tags$h3("Input:"),
+#                 #   numericInput("age", label = "the age of the echo:", value= 2.0),
+#                 #   numericInput("aortic_size", label = "the size of arotic at the first echo (cm):", value= 2.3),
+#                 #   actionButton("more_data", "more data", class = "btn btn-primary"),
+#                 # ), # sidebarPanel
+#                 # sidebarPanel(
+#                 #   HTML("<h3>Input parameters</h3>"),
+#                 #   #tags$h3("Input:"),
+#                 #   numericInput("age", label = "the age of the echo:", value= 2.0),
+#                 #   numericInput("aortic_size", label = "the size of arotic at the first echo (cm):", value= 2.3),
+#                 #   actionButton("more_data", "more data", class = "btn btn-primary"),
+#                 # ), # sidebarPanel
+# 
+#                 mainPanel(
+#                   h1("predicted value"),
+#                   verbatimTextOutput("txtout"),
+#                 ) # mainPanel
+# 
+# ) # fluidPage
+# #
+# #
+# # # Define server function
+# server <- function(input, output) {
+# 
+#   output$txtout <- renderText({
+#     paste( input$age, input$aortic_size, sep = " " )
+#   })
+# } # server
+# #
+# #
+# # # Create Shiny object
+# shinyApp(ui = ui, server = server)
+# # 
