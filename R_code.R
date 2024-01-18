@@ -13,6 +13,8 @@ library(lmerTest) #lmer()
 library(Metrics)
 library(lattice)
 library(latticeExtra)
+library(DT)
+library(shinyjs)
 
 library(shiny)
 library(rsconnect)
@@ -284,18 +286,49 @@ DynPlots <- function(model.output = model.output, newdata, timeVar,
   return(jpg_img)
 }
 
+preprocess_data <- function(dat1, input) {
+  ##colnames(dat_abstract)[colnames(dat_abstract)=='Sex'] <- 'female'
+  # colnames(dat)[colnames(dat)=='Echo_Date(mm/dd/yyyy)'] <- 'echo_date'
+  # colnames(dat)[colnames(dat)=='Aortic_Root_Dimension(cm)'] <- 'aort_root_new'
+  # colnames(dat)[colnames(dat)=='Weight(kg)'] <- 'Weight'
+  # colnames(dat)[colnames(dat)=='Height(cm)'] <- 'Height'
+  # colnames(dat)[colnames(dat)=='Aortic_root_z_score'] <- 'z_aort_root'
+  dat <- dat1
+  
+  colnames(dat)[colnames(dat)=='Echo_Date.mm.dd.yyyy.'] <- 'echo_date'
+  colnames(dat)[colnames(dat)=='Aortic_Root_Dimension.cm.'] <- 'aort_root_new'
+  colnames(dat)[colnames(dat)=='Weight.kg.'] <- 'Weight'
+  colnames(dat)[colnames(dat)=='Height.cm.'] <- 'Height'
+  colnames(dat)[colnames(dat)=='Aortic_Root_Z_Score'] <- 'z_aort_root'
+  dat <- dat[complete.cases(dat$aort_root_new), ]
+  selected_columns <- c("echo_date", "Weight", "Height", 'aort_root_new', 'z_aort_root', "ID")
+  dat <- dat[selected_columns]
+  
+  # if (input$first_user == 0) 
+  # dat$echo_date = as.Date(dat$echo_date )
+  dat$aort_root_new = as.numeric(dat$aort_root_new )
+  dat$Weight = as.numeric(dat$Weight )
+  dat$Height = as.numeric(dat$Height )
+  dat$z_aort_root = as.numeric(dat$z_aort_root )
+  dat$z_aort_root <- 4.3
+  ##if (input$first_user == 0)  {
+  dat$Echo_Age_Years <- as.numeric(difftime( as.Date(dat$echo_date, format="%m/%d/%Y" ), as.Date(input$birth_day, format="yyyy-mm-dd"), units = "days") / 365.0) 
+  
+
+  
+  
+  dat$Sex <- as.numeric(input$sex)
+  
+  ##dat <- dat[complete.cases(dat$aort_root_new), ]
+  return(dat)
+}
+
 process_data_plot <- function(dat, predict_age) {
   dat_abstract <- dat
   #print(colnames(dat_abstract))
   #colnames(dat_abstract)[colnames(dat_abstract)=='Age at Echo'] <- 'Echo_Age_Years'
   colnames(dat_abstract)[colnames(dat_abstract)=='Sex'] <- 'female'
-  colnames(dat_abstract)[colnames(dat_abstract)=='Aortic_Root_Dimension'] <- 'aort_root_new'
-  colnames(dat_abstract)[colnames(dat_abstract)=='Weight (kg)'] <- 'Weight'
-  colnames(dat_abstract)[colnames(dat_abstract)=='Height (cm)'] <- 'Height'
-  colnames(dat_abstract)[colnames(dat_abstract)=='Aortic.root.z.score'] <- 'z_aort_root'
-  #print(colnames(dat_abstract))
 
-  dat_abstract$female = dat_abstract$female - 1
   nd <- dat_abstract
   nd <-nd[with(nd,order(Echo_Age_Years)),]
 
@@ -325,11 +358,8 @@ process_data_plot <- function(dat, predict_age) {
   jpg_img <- DynPlots(model.output = model_ARS_Dem, newdata = nd,
                timeVar = "Echo_Age_Years",
                main_title = "predicted aortic size at age ")
-  
- 
 
   return(jpg_img)
-
 
 }
 
@@ -338,13 +368,13 @@ process_data_func2 <- function(dat, predict_age) {
   #print(colnames(dat_abstract))
   #colnames(dat_abstract)[colnames(dat_abstract)=='Age at Echo'] <- 'Echo_Age_Years'
   colnames(dat_abstract)[colnames(dat_abstract)=='Sex'] <- 'female'
-  colnames(dat_abstract)[colnames(dat_abstract)=='Aortic_Root_Dimension'] <- 'aort_root_new'
-  colnames(dat_abstract)[colnames(dat_abstract)=='Weight (kg)'] <- 'Weight'
-  colnames(dat_abstract)[colnames(dat_abstract)=='Height (cm)'] <- 'Height'
-  colnames(dat_abstract)[colnames(dat_abstract)=='Aortic.root.z.score'] <- 'z_aort_root'
-  #print(colnames(dat_abstract))
-  
-  dat_abstract$female = dat_abstract$female - 1
+  # colnames(dat_abstract)[colnames(dat_abstract)=='Aortic_Root_Dimension'] <- 'aort_root_new'
+  # colnames(dat_abstract)[colnames(dat_abstract)=='Weight (kg)'] <- 'Weight'
+  # colnames(dat_abstract)[colnames(dat_abstract)=='Height (cm)'] <- 'Height'
+  # colnames(dat_abstract)[colnames(dat_abstract)=='Aortic.root.z.score'] <- 'z_aort_root'
+  # #print(colnames(dat_abstract))
+  # 
+  # dat_abstract$female = dat_abstract$female - 1
   nd <- dat_abstract
   nd <-nd[with(nd,order(Echo_Age_Years)),]
   
@@ -379,6 +409,14 @@ process_data_func2 <- function(dat, predict_age) {
   
 }
 
+jscode <- "
+function cell_editCallback(table) {
+  table.on('click.dt', 'td', function() {
+    var index = table.cell(this).index();
+    Shiny.setInputValue('table_cell_edit', {row: index[0], col: index[1]});
+  });
+} "
+
 
 
 # ##dat_tch_final <- readRDS("./dat_tch_final.05.10.2023.rds")
@@ -401,57 +439,164 @@ process_data_func2 <- function(dat, predict_age) {
 ## model_ARS_Dem <- readRDS("//tccdav1b/Cardio_S/Morris/CLARITY/Frank/Aortic_Size_Prediction/CLARITY/rds/tch_data_trained_model.rds")
 ## model_ARS_Dem <- readRDS("C:\\Users\\yxcai\\Documents\\R_code\\web-test\\tch_data_trained_model.rds")
 model_ARS_Dem <- readRDS("./tch_data_trained_model.rds")
-
+input_table <- read.csv('template.csv')
+input_table_orig <- input_table
+input_table <- reactiveVal(data.frame(input_table))
 names(tags)
 
-ui <- fluidPage(tags$style("body { background-color: #ADD8E6; }"),
+ui <- fluidPage( useShinyjs(),
+  tags$style("body { background-color: #ADD8E6; }"),
   titlePanel(tags$h1(tags$b("Predict future Aortic Size based on the previous information for Marfan Syndrome patients"), align = "center") ),
   tags$br(),
   tags$br(),
   sidebarLayout( 
     sidebarPanel( width = 5,
-      HTML("<h3>Step 1: Download the template file to fill the information</h3>"),
-      ##tags$a("you can follow the video lecture", href = "https://www.youtube.com/watch?v=s4YKMFFiySI"),
-      downloadButton("download_data", "Step1: please Download the template file", width = 2),
-      tags$br(),
-      HTML("<h3>Step 2: upload your previous aortic size related information defined in CSV file</h4>"),
-      fileInput("file", " "),
+      # HTML("<h3>Step 1: Download the template file to fill the information</h3>"),
+      tags$a("you can follow the YouTube video lecture to learn how to use this website to calculate the future aortic size", href = "https://www.youtube.com/watch?v=s4YKMFFiySI"),
+      # downloadButton("download_data", "Step1: please Download the template file", width = 2),
+      # tags$br(),
+      # HTML("<h3>Step 2: upload your previous aortic size related information defined in CSV file</h4>"),
+      # fileInput("file", " "),
+      # numericInput("age_need_prediction", label = "the age of aortic size need to predict:", value= 15.0),
+      HTML("<h3>Step 1: please fill these information for prediction</h3>"),
+      dateInput("birth_day", "input your birth day", value = as.Date("2005-02-22") ),
+      selectInput("sex", "sex", 
+                  choices = list("female" = 0, "male" = 1,
+                                 "other" = 3), selected = 1),
+      selectInput("first_user", "have you a saved csv file before", 
+                  choices = list("No" = 0, "Yes" = 1),  selected = 1 ),
+      
+      conditionalPanel(
+        condition = "input.first_user == 1",  # Example condition
+        fileInput("file", "upload your saved file")
+      ),
       numericInput("age_need_prediction", label = "the age of aortic size need to predict:", value= 15.0),
-      actionButton("submit", "Submit"),
+      actionButton("submit", "submit"),
       tags$br(),
-      HTML("<h3>Step 3: optional step,enter your email to receive the results and the data will be saved and used for improving the AI model</h3>"),
+      HTML("<h3>Step 2: optional step,enter your email to receive the results and the data will be saved and used for improving the AI model</h3>"),
       textInput("email"," "),
       HTML("<h4> after you enter your email, click save button  </h4>"),
       actionButton("save_file", "Save the data"),
+      tags$br(),
+      HTML("<h3>Step 3: reset all stpes. </h3>"),
+      actionButton("reset", "reset"),
+      
       # HTML("<h4> ************************</h4>"),
     ),
     
     
     mainPanel( width = 7,
-      tableOutput("data"),
+      ## tableOutput("data"),
+      conditionalPanel(
+        condition = "input.first_user == 0",  # Example condition
+        DTOutput("myTable"),
+        actionButton("confirm", "please input the data and click this button, the date format is mm/dd/yyyy")
+      ),
+      
+      # conditionalPanel(
+      #   condition = "input.first_user == 0",  # Example condition
+      #   actionButton("confirm", "please input the data and click this button, the date format is mm/dd/yyyy")
+      # ),
+      
+      conditionalPanel(
+        condition = "input.first_user == 1",  # Example condition
+        tableOutput("data"),
+      ),
+       
+      conditionalPanel(
+        condition = "input.first_user == 0",  # Example condition
+        tableOutput("processed_data")
+      ),
+
+      conditionalPanel(
+        condition = "input.first_user == 1",  # Example condition
+        tableOutput("processed_data2")
+      ),
+      
       plotOutput(outputId = "my_plot"),
-      # tags$br(),
-      # tags$br(),
-      tags$h3(textOutput("result"))
-    )
-  ),
-  widths = c(1, 1)
- 
-)
+      tags$h1(textOutput("text_line")),
+      tags$h3(textOutput("result")),
+      tags$h1(textOutput("text_line1"))
+      
+      ##tags$h3(textOutput("text_line"))
+      
+     #  conditionalPanel(
+     #    condition = "input.first_user == 0",  # Example condition
+     #    plotOutput(outputId = "my_plot"),
+     #    tags$h3(textOutput("result"))
+     # ),
+     # 
+     # conditionalPanel(
+     #   condition = "input.first_user == 1",  # Example condition
+     #   plotOutput(outputId = "my_plot1"),
+     #   tags$h3(textOutput("result"))
+     # ),
+  ),  ## end of main panel
+     
+ ##  widths = c(1, 1)
+ )  ## end of sidebarLayout
+)  ## end of fluidpage 
 
 server <- function(input, output) {
-
-  data <- reactive({
-    file <- input$file
-    if (is.null(file)) {
-      return(NULL)
-    }
-    read.csv(file$datapath)
-  })
-
+  
+  
+  ##if (exists("input_orig"))  {print("it exist")}  else { input_orig<-copy(input )   }
+  
+  data <- reactive (
+    {
+      file <- input$file
+      if (is.null(file)) {
+        return(NULL)  }
+      read.csv(file$datapath) } )
+  
   output$data <- renderTable({
     data()
   })
+  
+  output$myTable <- renderDT ({
+    datatable(
+      input_table(),  # Replace with your data
+      editable = TRUE,  # Enable editing
+      ##callback = JS("cell_editCallback", "table"),
+      class = "cell-border stripe",
+      options = list(dom = "t")  ## hide some cells embedded into the code
+    )
+  } )
+  
+  observeEvent(input$myTable_cell_edit, {
+    info <- input$myTable_cell_edit
+    temp_data <- input_table()  # Retrieve the current data
+    temp_data[info$row, info$col] <- info$value  # Modify the data
+    input_table(temp_data)  # Update the reactive value
+  })
+  
+  ## output$myTable <- DT::renderDataTable({ data2() })
+  
+  ## processed_data <- reactive ({  preprocess_data(data(), input) } )
+  
+  ## observeEvent(input$confirm, {  output$processed_data <- renderTable( {preprocess_data(output$myTable, input) } ) } )
+  
+  # processed_data <- reactive({ if (input.first_user == 0) { preprocess_data(input_table(), input) }
+  #                              if (input.first_user == 1) { preprocess_data(data(), input)  }
+  #                          })
+  
+  fill_data <- reactive ({ preprocess_data(input_table(), input) })
+  upload_data <- reactive ({ preprocess_data(data(), input) })
+  
+  observeEvent(input$confirm, {  output$processed_data <- renderTable( {  fill_data() } ) } )   ##preprocess_data(input_table(), input)
+  observeEvent(input$submit, {  output$processed_data2 <- renderTable( { upload_data()  } ) } )   ##preprocess_data(input_table(), input)
+  
+  # processed_data <- reactive({ if(input$first_user == "1") { upload_data()   }  
+  #                              ## if(input$first_user == "1") { upload_data() }  
+  #                           })
+  ## output$processed_data <- renderTable({ processed_data() })
+                              
+  
+  
+  # if (input.first_user == 0)
+  # {
+  #   data <- reactive ( { output$myTable } )
+  # }
   
   # Download the data when the download button is clicked
   output$download_data <- downloadHandler(
@@ -463,12 +608,14 @@ server <- function(input, output) {
     }
   )
 
-  output_string <- reactive({  
-  result<-process_data_func2(data(), input$age_need_prediction)
+  output_string <- reactive({  if(input$first_user == "0")  {
+  result<-process_data_func2(fill_data(), input$age_need_prediction)  }
+  else  { result<-process_data_func2(upload_data(), input$age_need_prediction)  }
   paste("The predicted aortic size of at the age ", input$age_need_prediction, " is ", result[[1]], " cm; \n",'The predicted lower limit is ', result[[2]], "cm; \n",'The predicted upper limit is ', result[[3]], "cm; ")
   })
   
-  observeEvent(input$submit, { output$result <- renderText({ output_string()  } ) }  )
+  ## observeEvent(input$submit, { output$result <- renderText({ output_string()  } ) }  )
+
   
   ##  Keep this code
   # observeEvent(input$submit, { output$result <- renderText({ result<-process_data_func2(data(), input$age_need_prediction)
@@ -479,13 +626,48 @@ server <- function(input, output) {
   #                               output$my_plot <- renderPlot( { process_data_plot(data(), input$age_need_prediction ) } )
   #                           ggsave("img_folder/jpg_img", device = 'jpeg')   }  )
   
-  frank_plot <-  reactive({  process_data_plot(data(), input$age_need_prediction) })
+  frank_plot <-  reactive({ if(input$first_user == "0")  {  process_data_plot(fill_data(), input$age_need_prediction) }
+                            else  {  process_data_plot(upload_data(), input$age_need_prediction) }
+    })
   
   observeEvent(input$submit, {  
-                                output$my_plot <- renderPlot( { frank_plot()  } )
-                                ##frank_plot <- ggplotify(frank_plot)
-                                ##trellis.device("img_folder/jpg_img", type = "jpeg")
+                                output$my_plot <- renderPlot( {  ## process_data_plot(fill_data(), input$age_need_prediction)
+                                                                  if(input$first_user == "1")  {  process_data_plot(upload_data(), input$age_need_prediction) }
+                                                                  else  {  process_data_plot(fill_data(), input$age_need_prediction) }
+                                                            } )
                                   }   )
+  
+  # observeEvent(input$submit, {  output$my_plot1 <- renderPlot( {   process_data_plot(upload_data(), input$age_need_prediction) } )
+  #             }   )
+  
+  
+  
+  observeEvent(input$myTable_cell_edit, {
+    info <- input$myTable_cell_edit
+    temp_data <- input_table()  # Retrieve the current data
+    temp_data[info$row, info$col] <- info$value  # Modify the data
+    input_table(temp_data)  # Update the reactive value
+  })
+  
+  
+  observeEvent(input$reset, {  input_table <- input_table_orig
+                               ##input_table <- reactiveVal(input_table)
+                               shinyjs::reset("submit") 
+                               shinyjs::reset("confirm") 
+                               shinyjs::reset("input_table") 
+                               shinyjs::reset("myTable_cell_edit") 
+                               shinyjs::reset("first_user")  } )
+  
+  observeEvent(input$submit, {  output$text_line <- renderText( {"------------------------------------------------------------------------"} )   }  )
+  observeEvent(input$submit, {  output$text_line1 <- renderText( {"-----------------------------------------------------------------------"} )   }  )
+                             
+  # observeEvent( (input$submit && input$confirm ), {  
+  #   output$my_plot <- renderPlot( {   frank_plot()
+  #   } )
+  #   ##frank_plot <- ggplotify(frank_plot)
+  #   ##trellis.device("img_folder/jpg_img", type = "jpeg")
+  # }   )
+  
 
   # 
   # observeEvent(input$save_file, { ## for Table
@@ -498,31 +680,31 @@ server <- function(input, output) {
   #    }  )
   
 
-  # observeEvent(input$save_file, {
-  #               file_name <- gsub("@", "_", input$email )
-  #               file_name <- paste0("img_folder/", file_name, '.jpg')
-  #               jpeg(file_name)
-  #               print(frank_plot())
-  #               dev.off()
-  #               
-  #               attachment <- mime_part(x = file_name )
-  #               body <- output_string()
-  # 
-  #               sendmailR::sendmail( from = "yu.cai.tch@gmail.com",
-  #                                    to =  c(input$email),
-  #                                    subject = "Confirmation of Receive Your Data",
-  #                                    ##msg = mime_part("Confirmation of Receive Your Data"),
-  #                                    msg = list(body, attachment),
-  #                                    engine = "curl",
-  #                                    engineopts = list(username = "yu.cai.tch@gmail.com", password = "ybbm kusp woaq srbn"),
-  #                                    control=list(smtpServer="smtp://smtp.gmail.com:587", verbose = TRUE) )
-  #               } )
+  observeEvent(input$save_file, {
+                file_name <- gsub("@", "_", input$email )
+                file_name <- paste0("img_folder/", file_name, '.jpg')
+                jpeg(file_name)
+                print(frank_plot())
+                dev.off()
+
+                attachment <- mime_part(x = file_name )
+                body <- output_string()
+
+                sendmailR::sendmail( from = "yu.cai.tch@gmail.com",
+                                     to =  c(input$email),
+                                     subject = "Confirmation of Receive Your Data",
+                                     ##msg = mime_part("Confirmation of Receive Your Data"),
+                                     msg = list(body, attachment),
+                                     engine = "curl",
+                                     engineopts = list(username = "yu.cai.tch@gmail.com", password = "ybbm kusp woaq srbn"),
+                                     control=list(smtpServer="smtp://smtp.gmail.com:587", verbose = TRUE) )
+                } )
 
 }
 
 shinyApp(ui = ui, server = server)
 
-
+## runApp("R_code.R")
 
 ##print( output$data)
 ##
