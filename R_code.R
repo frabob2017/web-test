@@ -299,25 +299,28 @@ preprocess_data <- function(dat1, input) {
   colnames(dat)[colnames(dat)=='Aortic_Root_Dimension.cm.'] <- 'aort_root_new'
   colnames(dat)[colnames(dat)=='Weight.kg.'] <- 'Weight'
   colnames(dat)[colnames(dat)=='Height.cm.'] <- 'Height'
-  colnames(dat)[colnames(dat)=='Aortic_Root_Z_Score'] <- 'z_aort_root'
-  dat <- dat[complete.cases(dat$aort_root_new), ]
-  selected_columns <- c("echo_date", "Weight", "Height", 'aort_root_new', 'z_aort_root', "ID")
+  ## colnames(dat)[colnames(dat)=='Aortic_Root_Z_Score'] <- 'z_aort_root'
+  
+  selected_columns <- c("echo_date", "Weight", "Height", 'aort_root_new', "ID")  ## 'z_aort_root'
   dat <- dat[selected_columns]
+  ## dat <- dat[complete.cases(dat$aort_root_new, ) ]
+  ## dat <- dat[complete.cases(trimws(dat[, c("aort_root_new", 'Weight', 'Height', 'echo_date')] )), ]
+  dat <- dat %>% filter(nzchar(echo_date) & !is.na(echo_date), nzchar(Weight) & !is.na(Weight), nzchar(Height) & !is.na(Height), nzchar(echo_date) & !is.na(echo_date))
+  ##dat <- dat[complete.cases(dat$aort_root_new, dat$Height, dat$Weight, dat$echo_date), ]
   
   # if (input$first_user == 0) 
   # dat$echo_date = as.Date(dat$echo_date )
   dat$aort_root_new = as.numeric(dat$aort_root_new )
   dat$Weight = as.numeric(dat$Weight )
   dat$Height = as.numeric(dat$Height )
-  dat$z_aort_root = as.numeric(dat$z_aort_root )
+  ##dat$z_aort_root = as.numeric(dat$z_aort_root )
   dat$z_aort_root <- 4.3
+  
   ##if (input$first_user == 0)  {
   dat$Echo_Age_Years <- as.numeric(difftime( as.Date(dat$echo_date, format="%m/%d/%Y" ), as.Date(input$birth_day, format="yyyy-mm-dd"), units = "days") / 365.0) 
-  
-
-  
-  
   dat$Sex <- as.numeric(input$sex)
+  
+  ##dat <- dat[complete.cases(trimws(dat[, c("aort_root_new", 'Weight', 'Height', 'echo_date')] )), ]
   
   ##dat <- dat[complete.cases(dat$aort_root_new), ]
   return(dat)
@@ -401,11 +404,43 @@ process_data_func2 <- function(dat, predict_age) {
   predicted_value<- c(approx(dat$pred_times, dat$pred, xout=predict_age)$y, approx(dat$pred_times, dat$lower95, xout=predict_age)$y, approx(dat$pred_times, dat$upper95, xout=predict_age)$y )
   predicted_value <- round(predicted_value, 3)
   
+  ## dat_abstract$Echo_Age_Years[-1]
+  
   # DynPlots(model.output = model_ARS_Dem, newdata = nd,
   #          timeVar = "Echo_Age_Years",
   #          main_title = "predicted aortic size at age ")
+  if ( ( dat_abstract$Echo_Age_Years[-1] - floor(dat_abstract$Echo_Age_Years[-1]) ) <= 0.5 ) 
+  { start_value <- floor(dat_abstract$Echo_Age_Years[-1]) + 0.5 }
+  else
+  { start_value <- floor(dat_abstract$Echo_Age_Years[-1]) +  1 }
   
-  return( predicted_value)
+  predicted_age_list  <-  seq(from = start_value, to = 20, by = 0.5)
+  # matches <- outer(dat$pred_times, predicted_age_list , FUN = function(x, y) abs(x - y) )
+  # closest_indices_a <- apply(matches, 1, which.min)
+  # closest_values_a <- dat$pred_times[closest_indices_a]
+  
+  
+  # min_index_list <- c()
+  # for (ii in predicted_age_list) {
+  #   min_index <-which.min(abs(dat$pred_times - ii))
+  #   min_index_list <- append( min_index_list, min_index, after = length(min_index_list) )
+  # }
+  
+  min_index_list <- sapply(predicted_age_list, function(ii) { which.min(abs(dat$pred_times - ii)) })
+  
+  predicted_df <- data.frame( Echo_Age_Years = predicted_age_list, predictd_value <- dat$pred[min_index_list], predictd_upper <- dat$upper95[min_index_list], predictd_lower <- dat$lower95[min_index_list] )
+
+  colnames(predicted_df)[colnames(predicted_df)=='predictd_value....dat.pred.min_index_list.'] <- 'predictd_value'
+  colnames(predicted_df)[colnames(predicted_df)=='predictd_upper....dat.upper95.min_index_list.'] <- 'predictd_upper'
+  colnames(predicted_df)[colnames(predicted_df)=='predictd_lower....dat.lower95.min_index_list.'] <- 'predictd_lower'
+
+  
+  merge_data <- merge(dat_abstract, predicted_df, by = "Echo_Age_Years", all =TRUE)
+  
+  result_list <- list(predicted_value = predicted_value, predicted_df = predicted_df, merge_data = merge_data)
+  
+  
+  return( result_list)
   
 }
 
@@ -470,7 +505,7 @@ ui <- fluidPage( useShinyjs(),
         condition = "input.first_user == 1",  # Example condition
         fileInput("file", "upload your saved file")
       ),
-      numericInput("age_need_prediction", label = "the age of aortic size need to predict:", value= 15.0),
+      numericInput("age_need_prediction", label = "the age of aortic size need to predict (the maximal age our model can predict is less than 20 years old) :", value= 15.0),
       actionButton("submit", "submit"),
       tags$br(),
       HTML("<h3>Step 2: optional step,enter your email to receive the results and the data will be saved and used for improving the AI model</h3>"),
@@ -478,8 +513,8 @@ ui <- fluidPage( useShinyjs(),
       HTML("<h4> after you enter your email, click save button  </h4>"),
       actionButton("save_file", "Save the data"),
       tags$br(),
-      HTML("<h3>Step 3: reset all stpes. </h3>"),
-      actionButton("reset", "reset"),
+      # HTML("<h3>Step 3: reset all stpes. </h3>"),
+      # actionButton("reset", "reset"),
       
       # HTML("<h4> ************************</h4>"),
     ),
@@ -513,10 +548,12 @@ ui <- fluidPage( useShinyjs(),
         tableOutput("processed_data2")
       ),
       
+      tags$h3(textOutput("result"), style = "color:red"),
+      tableOutput("predicted_table"),
       plotOutput(outputId = "my_plot"),
-      tags$h1(textOutput("text_line")),
-      tags$h3(textOutput("result")),
-      tags$h1(textOutput("text_line1"))
+      # tags$h1(textOutput("text_line")),
+     
+      #tags$h1(textOutput("text_line1"))
       
       ##tags$h3(textOutput("text_line"))
       
@@ -537,10 +574,12 @@ ui <- fluidPage( useShinyjs(),
  )  ## end of sidebarLayout
 )  ## end of fluidpage 
 
-server <- function(input, output) {
-  
-  
+server <- function(input, output, session) {
   ##if (exists("input_orig"))  {print("it exist")}  else { input_orig<-copy(input )   }
+  
+ ## my_edit <- reactive ({input$myTable_cell_edit})
+  internal_count <- reactiveVal(-1)
+  internal_reset <- reactiveVal(0)
   
   data <- reactive (
     {
@@ -563,28 +602,13 @@ server <- function(input, output) {
     )
   } )
   
-  observeEvent(input$myTable_cell_edit, {
-    info <- input$myTable_cell_edit
-    temp_data <- input_table()  # Retrieve the current data
-    temp_data[info$row, info$col] <- info$value  # Modify the data
-    input_table(temp_data)  # Update the reactive value
-  })
-  
-  ## output$myTable <- DT::renderDataTable({ data2() })
-  
-  ## processed_data <- reactive ({  preprocess_data(data(), input) } )
-  
-  ## observeEvent(input$confirm, {  output$processed_data <- renderTable( {preprocess_data(output$myTable, input) } ) } )
-  
-  # processed_data <- reactive({ if (input.first_user == 0) { preprocess_data(input_table(), input) }
-  #                              if (input.first_user == 1) { preprocess_data(data(), input)  }
-  #                          })
+
   
   fill_data <- reactive ({ preprocess_data(input_table(), input) })
   upload_data <- reactive ({ preprocess_data(data(), input) })
   
-  observeEvent(input$confirm, {  output$processed_data <- renderTable( {  fill_data() } ) } )   ##preprocess_data(input_table(), input)
-  observeEvent(input$submit, {  output$processed_data2 <- renderTable( { upload_data()  } ) } )   ##preprocess_data(input_table(), input)
+  observeEvent(input$confirm, {  output$processed_data <- renderTable( {  preprocess_data(input_table(), input) } ) } )   ##preprocess_data(input_table(), input)
+  observeEvent(input$submit, {  output$processed_data2 <- renderTable( { preprocess_data(data(), input)  } ) } )   ##preprocess_data(input_table(), input)
   
   # processed_data <- reactive({ if(input$first_user == "1") { upload_data()   }  
   #                              ## if(input$first_user == "1") { upload_data() }  
@@ -608,13 +632,18 @@ server <- function(input, output) {
     }
   )
 
-  output_string <- reactive({  if(input$first_user == "0")  {
-  result<-process_data_func2(fill_data(), input$age_need_prediction)  }
-  else  { result<-process_data_func2(upload_data(), input$age_need_prediction)  }
-  paste("The predicted aortic size of at the age ", input$age_need_prediction, " is ", result[[1]], " cm; \n",'The predicted lower limit is ', result[[2]], "cm; \n",'The predicted upper limit is ', result[[3]], "cm; ")
+  result_list<- reactive({  if(input$first_user == "0")  {
+  process_data_func2(fill_data(), input$age_need_prediction)  }
+  else  { process_data_func2(upload_data(), input$age_need_prediction)  }
+  ## result <- result_list$predicted_value
+  ## paste("The predicted aortic size of at the age ", input$age_need_prediction, " is ", result[[1]], " cm; \n",'The predicted lower limit is ', result[[2]], "cm; \n",'The predicted upper limit is ', result[[3]], "cm; ")
   })
   
-  ## observeEvent(input$submit, { output$result <- renderText({ output_string()  } ) }  )
+  observeEvent(input$submit, { result <- result_list()$predicted_value
+  output_string <- paste("The predicted aortic size of at the age ", input$age_need_prediction, " is ", result[[1]], " cm; \n",'The predicted lower limit is ', result[[2]], "cm; \n",'The predicted upper limit is ', result[[3]], "cm; ")
+               output$result <- renderText({  output_string } ) 
+               output$predicted_table <- renderTable({ result_list()$predicted_df })
+               }  )
 
   
   ##  Keep this code
@@ -646,20 +675,21 @@ server <- function(input, output) {
     info <- input$myTable_cell_edit
     temp_data <- input_table()  # Retrieve the current data
     temp_data[info$row, info$col] <- info$value  # Modify the data
-    input_table(temp_data)  # Update the reactive value
+    input_table(temp_data)  # Update the reactive value 
   })
   
   
-  observeEvent(input$reset, {  input_table <- input_table_orig
-                               ##input_table <- reactiveVal(input_table)
-                               shinyjs::reset("submit") 
-                               shinyjs::reset("confirm") 
-                               shinyjs::reset("input_table") 
-                               shinyjs::reset("myTable_cell_edit") 
-                               shinyjs::reset("first_user")  } )
+  # observeEvent(input$reset, {  ##input_table <- input_table_orig
+  #                              input_table <-  reactiveVal(data.frame(input_table_orig))   ##reactiveVal(input_table)
+  #                              internal_count(input$confirm)
+  #                              shinyjs::reset("submit") 
+  #                              shinyjs::reset("confirm") 
+  #                              shinyjs::reset("input_table") 
+  #                              shinyjs::reset("myTable_cell_edit") 
+  #                              shinyjs::reset("first_user")  } )
   
-  observeEvent(input$submit, {  output$text_line <- renderText( {"------------------------------------------------------------------------"} )   }  )
-  observeEvent(input$submit, {  output$text_line1 <- renderText( {"-----------------------------------------------------------------------"} )   }  )
+ ## observeEvent(input$submit, {  output$text_line <- renderText( {"------------------------------------------------------------------------"} )   }  )
+ ## observeEvent(input$submit, {  output$text_line1 <- renderText( {"-----------------------------------------------------------------------"} )   }  )
                              
   # observeEvent( (input$submit && input$confirm ), {  
   #   output$my_plot <- renderPlot( {   frank_plot()
